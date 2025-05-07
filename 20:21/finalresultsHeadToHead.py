@@ -48,6 +48,8 @@ momentum_winner_victories = df_filtered[
     ((df_filtered["Momentum (Team)"] < df_filtered["Momentum (Opponent)"]) & (df_filtered["Momentum Winner"] == df_filtered["Opponent"]))
 ].shape[0]
 
+
+
 # Count cases where momentum switched (First Leg to Second Leg)
 momentum_switch_cases = df[
     ((df["First Leg Momentum (Team)"] > df["First Leg Momentum (Opponent)"]) &
@@ -70,8 +72,21 @@ momentum_switch_different_winner = df[
       (df["Second Leg Winner"] == df["Team"])))
 ].shape[0]
 
+momentum_switch_negative_winner = df[
+    (((df["First Leg Momentum (Team)"] > df["First Leg Momentum (Opponent)"]) &
+      (df["Second Leg Momentum (Team)"] < df["Second Leg Momentum (Opponent)"]) &
+      (df["First Leg Winner"] == df["Opponent"]) &
+      (df["Second Leg Winner"] == df["Team"])) |
+
+     ((df["First Leg Momentum (Team)"] < df["First Leg Momentum (Opponent)"]) &
+      (df["Second Leg Momentum (Team)"] > df["Second Leg Momentum (Opponent)"]) &
+      (df["First Leg Winner"] == df["Team"]) &
+      (df["Second Leg Winner"] == df["Opponent"])))
+].shape[0]
+
 # Print results
 print("Total Matches Analyzed:", total_matches_analyzed)
 print("Momentum Winner Victories:", momentum_winner_victories)
 print("Total Cases Where Momentum Switched:", momentum_switch_cases)
 print("Momentum Switched & Different Winners:", momentum_switch_different_winner)
+print("Momentum Switched & Negative Winner:", momentum_switch_negative_winner)

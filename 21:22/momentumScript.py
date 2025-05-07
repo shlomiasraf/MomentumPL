@@ -1,117 +1,120 @@
 import pandas as pd
+import random
 
-import pandas as pd
+def compute_empirical_prob(sequence, k, target="W"):
+    indices = []
+    for i in range(k, len(sequence)):
+        if all(sequence[i - j - 1] == target for j in range(k)):
+            indices.append(i)
+    if not indices:
+        return None, 0
+    return sum(1 for i in indices if sequence[i] == target) / len(indices), len(indices)
 
-def detect_momentum_and_update(file_path):
-    # Load the Excel file
+def simulate_bias(p, n, k, target="W", simulations=5000):
+    empirical_probs = []
+    choices = [target, "D" if target == "W" else "W", "L" if target != "L" else "D"]
+    for _ in range(simulations):
+        seq = [random.choices(choices, weights=[p, (1-p)/2, (1-p)/2])[0] for _ in range(n)]
+        prob, _ = compute_empirical_prob(seq, k, target)
+        if prob is not None:
+            empirical_probs.append(prob)
+    return sum(empirical_probs) / len(empirical_probs) if empirical_probs else 0
+
+def correct_for_bias(empirical, p, n, k, target="W"):
+    estimated_bias = simulate_bias(p, n, k, target)
+    corrected = empirical + (p - estimated_bias)
+    return corrected, estimated_bias
+
+def analyze_momentum(file_path):
     xls = pd.ExcelFile(file_path)
 
-    # Dictionary to store updated data for each team
-    updated_sheets = {}
-
-    # Global counters
+    # Positive momentum
     total_wins_in_momentum = 0
     total_non_wins_in_momentum = 0
-    total_losses_in_negative_momentum = 0
-    total_non_losses_in_negative_momentum = 0
+    total_corrected_wins_in_momentum = 0
+    total_positive_opportunities = 0
 
-    # Iterate over each sheet (team) in the Excel file
+    # Negative momentum
+    total_losses_in_momentum = 0
+    total_non_losses_in_momentum = 0
+    total_corrected_losses_in_momentum = 0
+    total_negative_opportunities = 0
+
     for sheet_name in xls.sheet_names:
         df = pd.read_excel(file_path, sheet_name=sheet_name)
 
-        # Ensure the W/D/L column exists
         if "W/D/L" not in df.columns:
-            print(f"Skipping {sheet_name}: 'W/D/L' column not found.")
             continue
 
-        # Variables to track momentum for each team
-        in_momentum = False
-        in_negative_momentum = False
-        win_streak = 0
-        lose_streak = 0
-        win_in_momentum = 0  # Wins while in positive momentum
-        lose_in_negative_momentum = 0  # Losses while in negative momentum
-        not_win_in_momentum = 0  # Games without a win while in momentum
-        not_lose_in_negative_momentum = 0  # Games without a loss while in negative momentum
+        results = df["W/D/L"].dropna().tolist()
+        n = len(results)
 
-        # New columns to track momentum status
-        momentum_column = []
-        negative_momentum_column = []
+        # --- Positive Momentum (after 2 wins) ---
+        emp_win_prob, num_pos = compute_empirical_prob(results, k=2, target="W")
+        if emp_win_prob is not None:
+            p_w = results.count("W") / n if n > 0 else 0.5
+            corrected_win_prob, est_win_bias = correct_for_bias(emp_win_prob, p_w, n, k=2, target="W")
+            corrected_wins = corrected_win_prob * num_pos
 
-        # Iterate over the W/D/L column
-        for result in df["W/D/L"].dropna():
-            # Check for positive momentum (winning streak)
-            if result == "W":
-                win_streak += 1
-                if in_momentum:
-                    win_in_momentum += 1
-                if win_streak == 2:  # Entering momentum
-                    in_momentum = True
-            else:
-                if in_momentum:
-                    not_win_in_momentum += 1
-                in_momentum = False  # Exiting momentum
-                win_streak = 0
+            total_corrected_wins_in_momentum += corrected_wins
+            total_positive_opportunities += num_pos
 
-            # Check for negative momentum (losing streak)
-            if result == "L":
-                lose_streak += 1
-                if in_negative_momentum:
-                    lose_in_negative_momentum += 1
-                if lose_streak == 2:  # Entering negative momentum
-                    in_negative_momentum = True
-            else:
-                if in_negative_momentum:
-                    not_lose_in_negative_momentum += 1
-                in_negative_momentum = False  # Exiting negative momentum
-                lose_streak = 0
+            # Count actual wins/non-wins
+            wins, non_wins = 0, 0
+            for i in range(2, n):
+                if results[i-1] == "W" and results[i-2] == "W":
+                    if results[i] == "W":
+                        wins += 1
+                    else:
+                        non_wins += 1
+            total_wins_in_momentum += wins
+            total_non_wins_in_momentum += non_wins
 
-            # Mark the row as part of positive/negative momentum or not
-            momentum_column.append(in_momentum)
-            negative_momentum_column.append(in_negative_momentum)
+            print(f"🔥 {sheet_name} — Positive Momentum:")
+            print(f"    Empirical: {emp_win_prob:.3f}, Corrected: {corrected_win_prob:.3f}, Bias: {p_w - est_win_bias:.3f}")
 
-        # Add the momentum columns to the DataFrame
-        df["In Momentum"] = momentum_column + [False] * (len(df) - len(momentum_column))  # Fill missing values
-        df["In Negative Momentum"] = negative_momentum_column + [False] * (len(df) - len(negative_momentum_column))  # Fill missing values
+        # --- Negative Momentum (after 2 losses) ---
+        emp_loss_prob, num_neg = compute_empirical_prob(results, k=2, target="L")
+        if emp_loss_prob is not None:
+            p_l = results.count("L") / n if n > 0 else 0.5
+            corrected_loss_prob, est_loss_bias = correct_for_bias(emp_loss_prob, p_l, n, k=2, target="L")
+            corrected_losses = corrected_loss_prob * num_neg
 
-        # Update global counters
-        total_wins_in_momentum += win_in_momentum
-        total_non_wins_in_momentum += not_win_in_momentum
-        total_losses_in_negative_momentum += lose_in_negative_momentum
-        total_non_losses_in_negative_momentum += not_lose_in_negative_momentum
+            total_corrected_losses_in_momentum += corrected_losses
+            total_negative_opportunities += num_neg
 
-        # Create summary rows
-        summary_rows = pd.DataFrame({
-            "W/D/L": [
-                "Total Wins in Momentum",
-                "Total Non-Wins in Momentum",
-                "Total Losses in Negative Momentum",
-                "Total Non-Losses in Negative Momentum"
-            ],
-            "In Momentum": [win_in_momentum, not_win_in_momentum, None, None],
-            "In Negative Momentum": [None, None, lose_in_negative_momentum, not_lose_in_negative_momentum]
-        })
+            # Count actual losses/non-losses
+            losses, non_losses = 0, 0
+            for i in range(2, n):
+                if results[i-1] == "L" and results[i-2] == "L":
+                    if results[i] == "L":
+                        losses += 1
+                    else:
+                        non_losses += 1
+            total_losses_in_momentum += losses
+            total_non_losses_in_momentum += non_losses
 
-        # Append the summary rows to the DataFrame
-        df = pd.concat([df, summary_rows], ignore_index=True)
+            print(f"❄️ {sheet_name} — Negative Momentum:")
+            print(f"    Empirical: {emp_loss_prob:.3f}, Corrected: {corrected_loss_prob:.3f}, Bias: {p_l - est_loss_bias:.3f}")
 
-        # Store the updated sheet
-        updated_sheets[sheet_name] = df
+    # Final Summaries
+    win_bias_total = total_corrected_wins_in_momentum - total_wins_in_momentum
+    win_bias_avg = win_bias_total / total_positive_opportunities if total_positive_opportunities else 0
+    loss_bias_total = total_corrected_losses_in_momentum - total_losses_in_momentum
+    loss_bias_avg = loss_bias_total / total_negative_opportunities if total_negative_opportunities else 0
 
-    # Save the updated Excel file
-    output_file_path = file_path.replace(".xlsx", "_updated.xlsx")  # Save as a new file
-    with pd.ExcelWriter(output_file_path, engine="xlsxwriter") as writer:
-        for sheet_name, df in updated_sheets.items():
-            df.to_excel(writer, sheet_name=sheet_name, index=False)
-
-    # Print final global statistics
-    print("\n✅ Final Summary Across All Teams:")
+    print("\n✅ Final Summary — Positive Momentum:")
     print(f"Total Wins in Momentum: {total_wins_in_momentum}")
     print(f"Total Non-Wins in Momentum: {total_non_wins_in_momentum}")
-    print(f"Total Losses in Negative Momentum: {total_losses_in_negative_momentum}")
-    print(f"Total Non-Losses in Negative Momentum: {total_non_losses_in_negative_momentum}")
-    print(f"\nUpdated file saved as: {output_file_path}")
+    print(f"Positive Momentum Bias (Corrected - Actual Wins): {win_bias_total:.2f}")
+    print(f"Average Bias Per Opportunity: {win_bias_avg:.3f}")
 
-# Example usage:
-file_path = "PLteamsData19:20.xlsx"  # Update with the correct path
-detect_momentum_and_update(file_path)
+    print("\n🧊 Final Summary — Negative Momentum:")
+    print(f"Total Losses in Negative Momentum: {total_losses_in_momentum}")
+    print(f"Total Non-Losses in Negative Momentum: {total_non_losses_in_momentum}")
+    print(f"Negative Momentum Bias (Corrected - Actual Losses): {loss_bias_total:.2f}")
+    print(f"Average Bias Per Opportunity: {loss_bias_avg:.3f}")
+
+    # Example usage:
+file_path = "PLteamsData21:22.xlsx"  # Update with the correct path
+analyze_momentum(file_path)
