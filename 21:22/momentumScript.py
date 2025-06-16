@@ -114,7 +114,6 @@ def analyze_momentum(file_path):
     print(f"Total Non-Losses in Negative Momentum: {total_non_losses_in_momentum}")
     print(f"Negative Momentum Bias (Corrected - Actual Losses): {loss_bias_total:.2f}")
     print(f"Average Bias Per Opportunity: {loss_bias_avg:.3f}")
-
     # Example usage:
 file_path = "PLteamsData21:22.xlsx"  # Update with the correct path
 analyze_momentum(file_path)

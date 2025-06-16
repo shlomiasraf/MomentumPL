@@ -45,5 +45,5 @@ def analyze_tight_vs_loose(file_path):
         print(f"{row['Momentum']} | Tight={row['Tight Schedule']} | {row['Outcome']}: {row['Count']}")
 
 # Example usage:
-file_path = "PLteamsData23:24_with_tight_schedule.xlsx"
+file_path = "PLteamsData19:20_with_tight_schedule.xlsx"
 analyze_tight_vs_loose(file_path)
