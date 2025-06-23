@@ -1,6 +1,6 @@
 import pandas as pd
 
-def process_team_schedule(sheet_df, default_year=2023, max_gap=7):
+def process_team_schedule(sheet_df, default_year=2023, max_gap=4):
     sheet_df = sheet_df.copy()
     sheet_df['Date'] = sheet_df['Date'].astype(str)
     sheet_df['Parsed Date'] = pd.to_datetime(sheet_df['Date'] + f'.{default_year}', format='%d.%m.%Y', errors='coerce')

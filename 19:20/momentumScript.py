@@ -1,120 +1,99 @@
 import pandas as pd
 import random
 
-def compute_empirical_prob(sequence, k, target="W"):
+def compute_empirical_score(sequence, k, target, score_map=None):
     indices = []
     for i in range(k, len(sequence)):
         if all(sequence[i - j - 1] == target for j in range(k)):
             indices.append(i)
     if not indices:
         return None, 0
-    return sum(1 for i in indices if sequence[i] == target) / len(indices), len(indices)
+    scores = [score_map.get(sequence[i], 0.0) for i in indices]
+    return sum(scores) / len(scores), len(indices)
 
-def simulate_bias(p, n, k, target="W", simulations=5000):
-    empirical_probs = []
+def simulate_bias(p, n, k, target, simulations=5000, score_map=None):
+    empirical_scores = []
     choices = [target, "D" if target == "W" else "W", "L" if target != "L" else "D"]
     for _ in range(simulations):
-        seq = [random.choices(choices, weights=[p, (1-p)/2, (1-p)/2])[0] for _ in range(n)]
-        prob, _ = compute_empirical_prob(seq, k, target)
-        if prob is not None:
-            empirical_probs.append(prob)
-    return sum(empirical_probs) / len(empirical_probs) if empirical_probs else 0
+        seq = [random.choices(choices, weights=[p, (1 - p) / 2, (1 - p) / 2])[0] for _ in range(n)]
+        score, _ = compute_empirical_score(seq, k, target=target,score_map=score_map)
+        if score is not None:
+            empirical_scores.append(score)
+    return sum(empirical_scores) / len(empirical_scores) if empirical_scores else 0
 
-def correct_for_bias(empirical, p, n, k, target="W"):
-    estimated_bias = simulate_bias(p, n, k, target)
-    corrected = empirical + (p - estimated_bias)
+def correct_for_bias(empirical, p, n, k, target,score_map=None):
+    estimated_bias = simulate_bias(p, n, k, target, score_map=score_map)
+    correction = estimated_bias - p
+    corrected = empirical + correction
     return corrected, estimated_bias
 
-def analyze_momentum(file_path):
+def analyze_success_vs_momentum(file_path):
     xls = pd.ExcelFile(file_path)
-
-    # Positive momentum
-    total_wins_in_momentum = 0
-    total_non_wins_in_momentum = 0
-    total_corrected_wins_in_momentum = 0
-    total_positive_opportunities = 0
-
-    # Negative momentum
-    total_losses_in_momentum = 0
-    total_non_losses_in_momentum = 0
-    total_corrected_losses_in_momentum = 0
-    total_negative_opportunities = 0
+    results_summary = []
 
     for sheet_name in xls.sheet_names:
         df = pd.read_excel(file_path, sheet_name=sheet_name)
-
         if "W/D/L" not in df.columns:
             continue
 
         results = df["W/D/L"].dropna().tolist()
         n = len(results)
+        if n < 5:
+            continue
 
-        # --- Positive Momentum (after 2 wins) ---
-        emp_win_prob, num_pos = compute_empirical_prob(results, k=2, target="W")
-        if emp_win_prob is not None:
-            p_w = results.count("W") / n if n > 0 else 0.5
-            corrected_win_prob, est_win_bias = correct_for_bias(emp_win_prob, p_w, n, k=2, target="W")
-            corrected_wins = corrected_win_prob * num_pos
+        score_map = {"W": 1.0, "D": 0.5, "L": 0.0}
+        season_scores = [score_map[r] for r in results if r in score_map]
+        season_avg = sum(season_scores) / len(season_scores) if season_scores else 0
 
-            total_corrected_wins_in_momentum += corrected_wins
-            total_positive_opportunities += num_pos
+        # WW Momentum
+        emp_ww_score, num_ww = compute_empirical_score(results, k=2, target="W", score_map=score_map)
+        p_w = results.count("W") / n if n > 0 else 0.5
+        if emp_ww_score is not None:
+            corrected_ww_prob, estimated_ww_bias = correct_for_bias(emp_ww_score, p_w, n, k=2, target="W", score_map=score_map)
+            ww_bias = round(p_w - estimated_ww_bias, 3)
+        else:
+            corrected_ww_prob = None
+            ww_bias = None
 
-            # Count actual wins/non-wins
-            wins, non_wins = 0, 0
-            for i in range(2, n):
-                if results[i-1] == "W" and results[i-2] == "W":
-                    if results[i] == "W":
-                        wins += 1
-                    else:
-                        non_wins += 1
-            total_wins_in_momentum += wins
-            total_non_wins_in_momentum += non_wins
+        score_map = {"L": 1.0, "D": 0.5, "W": 0.0}
+        season_scores = [score_map[r] for r in results if r in score_map]
+        season_lose_avg = sum(season_scores) / len(season_scores) if season_scores else 0
+        # LL Momentum
+        emp_ll_score, num_ll = compute_empirical_score(results, k=2, target="L",score_map=score_map)
+        p_l = results.count("L") / n if n > 0 else 0.5
+        if emp_ll_score is not None:
+            corrected_ll_prob, estimated_ll_bias = correct_for_bias(emp_ll_score, p_l, n, k=2, target="L",score_map=score_map)
+            ll_bias = round(p_l - estimated_ll_bias, 3)
+        else:
+            corrected_ll_prob = None
+            ll_bias = None
 
-            print(f"🔥 {sheet_name} — Positive Momentum:")
-            print(f"    Empirical: {emp_win_prob:.3f}, Corrected: {corrected_win_prob:.3f}, Bias: {p_w - est_win_bias:.3f}")
+        # Append to summary
+        results_summary.append({
+            "Team": sheet_name,
+            "Season Avg %": round(season_avg * 100, 1),
+            "WW Momentum Win % (corrected)": round(corrected_ww_prob * 100, 1) if corrected_ww_prob is not None else None,
+            "WW Diff": round((corrected_ww_prob - season_avg) * 100, 1) if corrected_ww_prob is not None else None,
+            "WW Bias": ww_bias,
+            "Season Lose Avg %": round(season_lose_avg * 100, 1),
+            "LL Momentum Loss % (corrected)": round(corrected_ll_prob * 100, 1) if corrected_ll_prob is not None else None,
+            "LL Diff": round((corrected_ll_prob - season_lose_avg) * 100, 1) if corrected_ll_prob is not None else None,
+            "LL Bias": ll_bias
+        })
+    df_summary = pd.DataFrame(results_summary)
+    print("\n📊 Corrected Momentum vs. Season Success Rate (with Bias):\n")
+    print(df_summary.to_string(index=False))
+    # Calculate and print overall averages
+    avg_season_win = df_summary["Season Avg %"].mean()
+    avg_ww_momentum = df_summary["WW Momentum Win % (corrected)"].mean()
+    avg_season_lose = df_summary["Season Lose Avg %"].mean()
+    avg_ll_momentum = df_summary["LL Momentum Loss % (corrected)"].mean()
 
-        # --- Negative Momentum (after 2 losses) ---
-        emp_loss_prob, num_neg = compute_empirical_prob(results, k=2, target="L")
-        if emp_loss_prob is not None:
-            p_l = results.count("L") / n if n > 0 else 0.5
-            corrected_loss_prob, est_loss_bias = correct_for_bias(emp_loss_prob, p_l, n, k=2, target="L")
-            corrected_losses = corrected_loss_prob * num_neg
-
-            total_corrected_losses_in_momentum += corrected_losses
-            total_negative_opportunities += num_neg
-
-            # Count actual losses/non-losses
-            losses, non_losses = 0, 0
-            for i in range(2, n):
-                if results[i-1] == "L" and results[i-2] == "L":
-                    if results[i] == "L":
-                        losses += 1
-                    else:
-                        non_losses += 1
-            total_losses_in_momentum += losses
-            total_non_losses_in_momentum += non_losses
-
-            print(f"❄️ {sheet_name} — Negative Momentum:")
-            print(f"    Empirical: {emp_loss_prob:.3f}, Corrected: {corrected_loss_prob:.3f}, Bias: {p_l - est_loss_bias:.3f}")
-
-    # Final Summaries
-    win_bias_total = total_corrected_wins_in_momentum - total_wins_in_momentum
-    win_bias_avg = win_bias_total / total_positive_opportunities if total_positive_opportunities else 0
-    loss_bias_total = total_corrected_losses_in_momentum - total_losses_in_momentum
-    loss_bias_avg = loss_bias_total / total_negative_opportunities if total_negative_opportunities else 0
-
-    print("\n✅ Final Summary — Positive Momentum:")
-    print(f"Total Wins in Momentum: {total_wins_in_momentum}")
-    print(f"Total Non-Wins in Momentum: {total_non_wins_in_momentum}")
-    print(f"Positive Momentum Bias (Corrected - Actual Wins): {win_bias_total:.2f}")
-    print(f"Average Bias Per Opportunity: {win_bias_avg:.3f}")
-
-    print("\n🧊 Final Summary — Negative Momentum:")
-    print(f"Total Losses in Negative Momentum: {total_losses_in_momentum}")
-    print(f"Total Non-Losses in Negative Momentum: {total_non_losses_in_momentum}")
-    print(f"Negative Momentum Bias (Corrected - Actual Losses): {loss_bias_total:.2f}")
-    print(f"Average Bias Per Opportunity: {loss_bias_avg:.3f}")
-
-    # Example usage:
-file_path = "PLteamsData19:20.xlsx"  # Update with the correct path
-analyze_momentum(file_path)
+    print("\n📈 Overall Averages:")
+    print(f"Average Season Win %: {avg_season_win:.1f}")
+    print(f"Average WW Momentum Win % (corrected): {avg_ww_momentum:.1f}")
+    print(f"Average Season Lose %: {avg_season_lose:.1f}")
+    print(f"Average LL Momentum Loss % (corrected): {avg_ll_momentum:.1f}")
+# Example usage
+file_path = "PLteamsData19:20_with_tight_schedule.xlsx"
+analyze_success_vs_momentum(file_path)
